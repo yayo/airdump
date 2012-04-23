@@ -568,6 +568,71 @@ struct param /* TODO move into thread */
 void* scan(void *p0)
 {const struct param *&p=(const struct param *&)p0;
  aps_t aps0;
+ if(NULL!=p->file)
+  {boost::property_tree::ptree pt;
+   boost::property_tree::json_parser::read_json(p->file,pt);
+   boost::property_tree::ptree::const_iterator i;
+   for(i=pt.begin();i!=pt.end();i++)
+    {assert(7==i->second.size());
+     boost::property_tree::ptree::const_iterator i2=i->second.begin();
+     beacon b;
+
+     assert(i2->first.empty());
+     b.essid=(i2++)->second.data();
+
+     assert(i2->first.empty()&&22==i2->second.data().size()&&'T'==i2->second.data()[8]&&'.'==i2->second.data()[15]);
+     b.ts.tv_sec=(boost::posix_time::from_iso_string(i2->second.data().substr(0,15))-boost::posix_time::ptime(boost::gregorian::date(1970,1,1))).total_seconds() ;
+     b.ts.tv_usec=boost::lexical_cast<uint32_t>(i2->second.data().substr(16,6));
+     i2++;
+
+     assert(i2->first.empty());
+     b.count=boost::lexical_cast<size_t>((i2++)->second.data());
+
+     assert(i2->first.empty());
+     b.power=boost::lexical_cast<int16_t>((i2++)->second.data());
+     assert(i2->first.empty());
+     b.power_max=boost::lexical_cast<int16_t>((i2++)->second.data());
+     assert(b.power<=b.power_max);
+
+     assert(i2->first.empty()&&!i2->second.empty());
+     boost::property_tree::ptree::const_iterator i3;
+     bool channel_from_beacon=false;
+     for(i3=i2->second.begin();i3!=i2->second.end();i3++)
+      {uint8_t channel_source=boost::lexical_cast<uint16_t>(i3->second.data());
+       switch(channel_source)
+        {case CHANNEL_FROM_BEACON:
+          if(false==channel_from_beacon) channel_from_beacon=true;
+          else assert(false==channel_from_beacon);
+          break;
+         case CHANNEL_FROM_RADIOTAP: break;
+         default:
+          assert(CHANNEL_FROM_BEACON==channel_source||CHANNEL_FROM_RADIOTAP==channel_source);
+          break;
+        }
+       b.channel.insert(std::pair<int16_t,uint8_t>(boost::lexical_cast<int16_t>(i3->first),channel_source));
+      }
+     assert(true==channel_from_beacon);
+     i2++;
+
+     assert(i2->first.empty());
+     std::list<std::string> s;
+     boost::algorithm::split(s,i2->second.data(),boost::is_any_of(" "));
+     assert(1<=s.size());
+     std::list<std::string>::const_iterator i4=s.begin();
+     std::map<std::string,uint16_t>::const_iterator i5=string2security.find(*i4);
+     assert(string2security.end()!=i5);
+     b.security=i5->second;
+     assert(0==(b.security&0x3FFF));
+     for(i4++;s.end()!=i4;i4++)
+      {i5=string2security.find(*i4);
+       assert(string2security.end()!=i5);
+       b.security|=i5->second;
+      }
+     assert(i2->second.data()==security2string(b.security));
+     aps0.insert(aps_t::value_type(*(std::basic_string<uint8_t>*)&(i->first),b));
+    }
+  }
+
  scan_t aps={&aps0,sizeof(TITLE_CHANNELS)-1,sizeof(TITLE_ESSID)-1,sizeof(TITLE_SECURITY)-1,0,0,0,0,writescreen,p->file};
  *(p->aps)=&aps;
  struct kevent change;
@@ -587,87 +652,10 @@ void* scan(void *p0)
 }
 
 int main(int argc,char *argv[])
-{
-
-if(0)
-{
-
-std::ifstream is("aps");
-boost::property_tree::ptree pt;
-boost::property_tree::json_parser::read_json(is, pt);
-is.close();
-
-aps_t aps;
-boost::property_tree::ptree::const_iterator i;
-for(i=pt.begin();i!=pt.end();i++)
- {assert(7==i->second.size());
-  boost::property_tree::ptree::const_iterator i2=i->second.begin();
-  std::cout<<i->first<<'\n';
-  beacon b;
-
-  assert(i2->first.empty());
-  b.essid=(i2++)->second.data();
-
-  assert(i2->first.empty()&&22==i2->second.data().size()&&'T'==i2->second.data()[8]&&'.'==i2->second.data()[15]);
-  b.ts.tv_sec=(boost::posix_time::from_iso_string(i2->second.data().substr(0,15))-boost::posix_time::ptime(boost::gregorian::date(1970,1,1))).total_seconds() ;
-  b.ts.tv_usec=boost::lexical_cast<uint32_t>(i2->second.data().substr(16,6));
-  i2++;
-
-  assert(i2->first.empty());
-  b.count=boost::lexical_cast<size_t>((i2++)->second.data());
-
-  assert(i2->first.empty());
-  b.power=boost::lexical_cast<int16_t>((i2++)->second.data());
-  assert(i2->first.empty());
-  b.power_max=boost::lexical_cast<int16_t>((i2++)->second.data());
-  assert(b.power<=b.power_max);
-
-  assert(i2->first.empty()&&!i2->second.empty());
-  boost::property_tree::ptree::const_iterator i3;
-  bool channel_from_beacon=false;
-  for(i3=i2->second.begin();i3!=i2->second.end();i3++)
-   {uint8_t channel_source=boost::lexical_cast<uint16_t>(i3->second.data());
-    switch(channel_source)
-     {case CHANNEL_FROM_BEACON:
-       if(false==channel_from_beacon) channel_from_beacon=true;
-       else assert(false==channel_from_beacon);
-       break;
-      case CHANNEL_FROM_RADIOTAP: break;
-      default:
-       assert(CHANNEL_FROM_BEACON==channel_source||CHANNEL_FROM_RADIOTAP==channel_source);
-       break;
-     }
-    b.channel.insert(std::pair<int16_t,uint8_t>(boost::lexical_cast<int16_t>(i3->first),channel_source));
-   }
-  assert(true==channel_from_beacon);
-  i2++;
-
-  assert(i2->first.empty());
-  std::list<std::string> s;
-  boost::algorithm::split(s,i2->second.data(),boost::is_any_of(" "));
-  assert(1<=s.size());
-  std::list<std::string>::const_iterator i4=s.begin();
-  std::map<std::string,uint16_t>::const_iterator i5=string2security.find(*i4);
-  assert(string2security.end()!=i5);
-  b.security=i5->second;
-  assert(0==(b.security&0x3FFF));
-  for(i4++;s.end()!=i4;i4++)
-   {i5=string2security.find(*i4);
-    assert(string2security.end()!=i5);
-    b.security|=i5->second;
-   }
-  assert(i2->second.data()==security2string(b.security));
-  aps.insert(aps_t::value_type(*(std::basic_string<uint8_t>*)&(i->first),b));
- }
-
-return(0);
-
-}
-
- if(2>argc)
+{if(2>argc) /* TODO boost/program_options */
   {return(-1);
   }
- else
+ else /* TODO return(rt); */
   {char ebuf[PCAP_ERRBUF_SIZE];
    param p;
    p.pd=pcap_open_live(argv[1],65535,1,0,ebuf);
@@ -723,110 +711,114 @@ return(0);
                      {return(-1);
                      }
                     else
-                     {scan_t *aps=NULL;
-                      p.aps=&aps;
-                      initscr();
-                      nonl();
-                      curs_set(0);
-                      raw();
-                      keypad(stdscr,TRUE);
-                      noecho();
-                      if(0!=pthread_create(&t,&a,scan,&p))
-                        {return(-1);
-                        }
-                      else
-                       {
-                        while(NULL==aps); // Wait scan() init it
-                        aps_sort_t::o='b';
-                        int c;
-                        while('q'!=(c=getch()))
-                        //while('q'!=(c=getchar()))
-                         {assert(3<=LINES&&"TITLE+DISPLAY+PAGE");
-                          switch(c)
-                           {
-                            case 't':
-                            case 'b':
-                            case 'n':
-                            case 'c':
-                            case 'p':
-                            case 'w':
-                            case 'e':
-                            case 's':
-                             if(c==aps_sort_t::o[0]) aps_sort_t::o[0]=toupper(c);
-                             else if(toupper(c)==aps_sort_t::o[0]) aps_sort_t::o[0]=c;
-                             else
-                              {size_t i;
-                               i=aps_sort_t::o.find(c);
-                               if(aps_sort_t::o.size()>i) aps_sort_t::o.erase(i,1);
+                     {std::fstream file("aps");
+                      if(file.good())
+                       {p.file=&file;
+                        scan_t *aps=NULL;
+                        p.aps=&aps;
+                        initscr();
+                        nonl();
+                        curs_set(0);
+                        raw();
+                        keypad(stdscr,TRUE);
+                        noecho();
+                        if(0!=pthread_create(&t,&a,scan,&p))
+                          {return(-1);
+                          }
+                        else
+                         {
+                          while(NULL==aps); // Wait scan() init it
+                          aps_sort_t::o='b';
+                          int c;
+                          while('q'!=(c=getch()))
+                          //while('q'!=(c=getchar()))
+                           {assert(3<=LINES&&"TITLE+DISPLAY+PAGE");
+                            switch(c)
+                             {
+                              case 't':
+                              case 'b':
+                              case 'n':
+                              case 'c':
+                              case 'p':
+                              case 'w':
+                              case 'e':
+                              case 's':
+                               if(c==aps_sort_t::o[0]) aps_sort_t::o[0]=toupper(c);
+                               else if(toupper(c)==aps_sort_t::o[0]) aps_sort_t::o[0]=c;
                                else
-                                {c=toupper(c);
+                                {size_t i;
                                  i=aps_sort_t::o.find(c);
                                  if(aps_sort_t::o.size()>i) aps_sort_t::o.erase(i,1);
+                                 else
+                                  {c=toupper(c);
+                                   i=aps_sort_t::o.find(c);
+                                   if(aps_sort_t::o.size()>i) aps_sort_t::o.erase(i,1);
+                                  }
+                                 aps_sort_t::o=aps_sort_t::o.insert(0,1,c);
                                 }
-                               aps_sort_t::o=aps_sort_t::o.insert(0,1,c);
-                              }
-                             break;
-                            case 'o':
-                             if(0==aps->power_max) aps->power_max=1;
-                             else aps->power_max=0;
-                             break;
-                            case KEY_RIGHT:
-                             if(sizeof(TITLE_PRE)+aps->max_length_channel+aps->max_length_essid +aps->max_length_security+1>aps->start_COL+COLS) aps->start_COL++;
-                             break;
-                            case KEY_LEFT:
-                             if(0!=aps->start_COL) aps->start_COL--;
-                             break;
-#define DISPLAY_LINES (LINES-1)
-#define PAGE_MOVE (DISPLAY_LINES-1)
-                            case KEY_DOWN:
-                             if(aps->aps->size()>aps->start_LINE+DISPLAY_LINES) aps->start_LINE++;
-                             break;
-                            case KEY_UP:
-                             if(0!=aps->start_LINE) aps->start_LINE--;
-                             break;
-                            case KEY_NPAGE:
-                             if(aps->aps->size()>aps->start_LINE+DISPLAY_LINES+PAGE_MOVE) aps->start_LINE+=PAGE_MOVE;
-                             else aps->start_LINE=aps->aps->size()>(size_t)DISPLAY_LINES?aps->aps->size()-DISPLAY_LINES:0;
-                             break;
-                            case KEY_PPAGE:
-                             if((size_t)(PAGE_MOVE)<aps->start_LINE) aps->start_LINE-=PAGE_MOVE;
-                             else aps->start_LINE=0;
-                             break;
-                            case KEY_END:
-                             //aps->start_LINE=aps->aps->size()>(size_t)DISPLAY_LINES?aps->aps->size()-DISPLAY_LINES:0;
-                             break;
-                            case KEY_HOME:
-                             //aps->start_LINE=0;
-                             break;
-                            case 'r':
-                             //aps->nonblock=~(aps->nonblock); /* TODO Why */
-                             if(0==aps->nonblock) aps->nonblock=1;
-                             else aps->nonblock=0;
-                             //pcap_setnonblock(p.pd,0/*aps->nonblock*/,ebuf);
-                             break;
-/*
-                            case 'z': // TODO debug stderr
-                             def_prog_mode();
-                             endwin();
-                             break;
-                            case 'x':
-                             reset_prog_mode();
-                             refresh();
-                             break;
-*/
-                            default:;
-                             //fprintf(stderr,"%08X\n",c);
+                               break;
+                              case 'o':
+                               if(0==aps->power_max) aps->power_max=1;
+                               else aps->power_max=0;
+                               break;
+                              case KEY_RIGHT:
+                               if(sizeof(TITLE_PRE)+aps->max_length_channel+aps->max_length_essid +aps->max_length_security+1>aps->start_COL+COLS) aps->start_COL++;
+                               break;
+                              case KEY_LEFT:
+                               if(0!=aps->start_COL) aps->start_COL--;
+                               break;
+  #define DISPLAY_LINES (LINES-1)
+  #define PAGE_MOVE (DISPLAY_LINES-1)
+                              case KEY_DOWN:
+                               if(aps->aps->size()>aps->start_LINE+DISPLAY_LINES) aps->start_LINE++;
+                               break;
+                              case KEY_UP:
+                               if(0!=aps->start_LINE) aps->start_LINE--;
+                               break;
+                              case KEY_NPAGE:
+                               if(aps->aps->size()>aps->start_LINE+DISPLAY_LINES+PAGE_MOVE) aps->start_LINE+=PAGE_MOVE;
+                               else aps->start_LINE=aps->aps->size()>(size_t)DISPLAY_LINES?aps->aps->size()-DISPLAY_LINES:0;
+                               break;
+                              case KEY_PPAGE:
+                               if((size_t)(PAGE_MOVE)<aps->start_LINE) aps->start_LINE-=PAGE_MOVE;
+                               else aps->start_LINE=0;
+                               break;
+                              case KEY_END:
+                               //aps->start_LINE=aps->aps->size()>(size_t)DISPLAY_LINES?aps->aps->size()-DISPLAY_LINES:0;
+                               break;
+                              case KEY_HOME:
+                               //aps->start_LINE=0;
+                               break;
+                              case 'r':
+                               //aps->nonblock=~(aps->nonblock); /* TODO Why */
+                               if(0==aps->nonblock) aps->nonblock=1;
+                               else aps->nonblock=0;
+                               //pcap_setnonblock(p.pd,0/*aps->nonblock*/,ebuf);
+                               break;
+  /*
+                              case 'z': // TODO debug stderr
+                               def_prog_mode();
+                               endwin();
+                               break;
+                              case 'x':
+                               reset_prog_mode();
+                               refresh();
+                               break;
+  */
+                              default:;
+                               //fprintf(stderr,"%08X\n",c);
+                             }
+                            draw(aps);
                            }
-                          draw(aps);
                          }
+                        endwin();
+                        //std::ofstream file("aps");
+                        //aps->file=&std::cout;
+                        //aps->file=&file;
+                        aps->out=writefile;
+                        draw(aps);
+                        file.close();
                        }
-                      endwin();
-                      std::ofstream file("aps");
-                      //aps->file=&std::cout;
-                      aps->file=&file;
-                      aps->out=writefile;
-                      draw(aps);
-                      file.close();
                      }
                     pthread_attr_destroy(&a);
                    }
