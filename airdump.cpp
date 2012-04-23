@@ -64,10 +64,7 @@ os<<"},\""
   return(os);
  }
 
-typedef std::map<std::basic_string<uint8_t>,beacon> aps_t;
- /* TODO std::basic_string<uint8_t> => uint64_t => struct ether_addr
-uint8_t ether_addr_octet[ETHER_ADDR_LEN]
- */
+typedef std::map<uint64_t,beacon> aps_t;
 
 struct aps_sort_t
 {static std::string o;
@@ -397,7 +394,7 @@ void parse(uint8_t *aps0,const struct pcap_pkthdr *h,const uint8_t *p)
 
  std::string essid(ESSID_NOT_FOUND);
  std::map<int16_t,uint8_t> channel;
- aps_t::key_type mac(p+radiotap_len+10,p+radiotap_len+16);
+ aps_t::key_type mac= 0x0000FFFFFFFFFFFF & betoh64(*(aps_t::key_type*)(p+radiotap_len+10-(sizeof(aps_t::key_type)-6)));
  uint16_t security=0;
  if(0x10 & *(p+radiotap_len+34))
   security|=STD_WEP|ENC_WEP;
@@ -502,7 +499,7 @@ pthread_exit(0);
      e+="Security["+(boost::format("%|1$04X|:%|2$04X|")%i->second.security%security).str()+"]";
     }
    if(!e.empty())
-    {mvaddstr(LINES-1,0,("Error: "+(boost::format("%|1$02X|%|2$02X|%|3$02X|%|4$02X|%|5$02X|%|6$02X| ") %(uint16_t)i->first[0] %(uint16_t)i->first[1] %(uint16_t)i->first[2] %(uint16_t)i->first[3] %(uint16_t)i->first[4] %(uint16_t)i->first[5] ).str()+e).c_str());
+    {mvaddstr(LINES-1,0,("Error: "+(boost::format("%|1$012X| ") %i->first).str()+e).c_str());
      clrtoeol();
      refresh();
      exit(-1);
@@ -529,7 +526,7 @@ void writescreen(const std::set<aps_sort_t> &aps_sort,const scan_t* aps)
  for(line=0;line<aps->start_LINE&&sort!=aps_sort.end();sort++,line++);
  for(line=1;line<(size_t)LINES&&sort!=aps_sort.end();sort++,line++)
   {const aps_t::const_iterator &i=sort->i;
-   mvaddstr(line,0,(boost::format("%|13$-8s|.%|12$03u| %|11$02X|%|10$02X|%|9$02X|%|8$02X|%|7$02X|%|6$02X| %|5$6lu| %|4$3d| "+fmt) %i->second.cache.security % (i->second.essid) % i->second.cache.channel %(int16_t)(aps->power_max?i->second.power_max:i->second.power) %(uint16_t)i->second.count %(uint16_t)i->first[5] %(uint16_t)i->first[4] %(uint16_t)i->first[3] %(uint16_t)i->first[2] %(uint16_t)i->first[1] %(uint16_t)i->first[0] %(i->second.ts.tv_usec/1000) %boost::posix_time::to_simple_string(boost::posix_time::from_time_t(i->second.ts.tv_sec).time_of_day())).str().substr(aps->start_COL,COLS).c_str());
+   mvaddstr(line,0,(boost::format("%|8$-8s|.%|7$03u| %|6$012X| %|5$6lu| %|4$3d| "+fmt) %i->second.cache.security % (i->second.essid) % i->second.cache.channel %(int16_t)(aps->power_max?i->second.power_max:i->second.power) %(uint16_t)i->second.count %i->first %(i->second.ts.tv_usec/1000) %boost::posix_time::to_simple_string(boost::posix_time::from_time_t(i->second.ts.tv_sec).time_of_day())).str().substr(aps->start_COL,COLS).c_str());
    clrtoeol();
   }
  refresh();
@@ -542,11 +539,12 @@ void writefile(const std::set<aps_sort_t> &aps_sort,const scan_t* aps)
  std::set<aps_sort_t>::const_iterator sort=aps_sort.begin();
  for(;sort!=aps_sort.end();)
   {const aps_t::const_iterator &i=sort->i;
-   *(aps->file)<<'\"'<<(boost::format("%|1$02X|%|2$02X|%|3$02X|%|4$02X|%|5$02X|%|6$02X|") %(uint16_t)i->first[0] %(uint16_t)i->first[1] %(uint16_t)i->first[2] %(uint16_t)i->first[3] %(uint16_t)i->first[4] %(uint16_t)i->first[5] )<<"\":"<<i->second;
+   *(aps->file)<<'\"'<<(boost::format("%|1$012X|") %i->first)<<"\":"<<i->second;
    if(aps_sort.end()!=++sort) *(aps->file)<<",";
     *(aps->file)<<'\n';
   }
  *(aps->file)<<'}';
+ aps->file->flush();
  ((scan_t*)aps)->out=writescreen;
 }
 
@@ -575,6 +573,10 @@ void* scan(void *p0)
    boost::property_tree::ptree::const_iterator i;
    for(i=pt.begin();i!=pt.end();i++)
     {assert(12==i->first.size());
+     aps_t::key_type bssid;
+     assert(1==sscanf(i->first.c_str(),"%012llX",&bssid)); /* TODO reject invalid */
+     assert(aps0.end()==aps0.find(bssid));
+
      assert(7==i->second.size());
      boost::property_tree::ptree::const_iterator i2=i->second.begin();
      beacon b;
@@ -636,12 +638,7 @@ void* scan(void *p0)
      b.cache.security=security2string(b.security);
      assert(i2->second.data()==b.cache.security);
      if(b.cache.security.size()>aps.max_length_security) aps.max_length_security=b.cache.security.size();
-
-     uint8_t bssid[6+8];
-     assert(6==sscanf(i->first.c_str(),"%02X%02X%02X%02X%02X%02X",(unsigned int*)(bssid+0),(unsigned int*)(bssid+1),(unsigned int*)(bssid+2),(unsigned int*)(bssid+3),(unsigned int*)(bssid+4),(unsigned int*)(bssid+5)));
-     std::basic_string<uint8_t> bssid1(bssid,bssid+6);
-     assert(aps0.end()==aps0.find(bssid1));
-     aps0.insert(aps_t::value_type(bssid1,b));
+     aps0.insert(aps_t::value_type(bssid,b));
     }
   }
 
@@ -665,17 +662,6 @@ void* scan(void *p0)
 int main(int argc,char *argv[])
 {
 
-std::string s2("123");
-     std::basic_string<uint8_t> bssid;
-     std::string::const_iterator i6;
-     for(i6=s2.begin();s2.end()!=i6;i6++)
-      {int8_t t1=*i6;
-       uint8_t t2=t1;
-       bssid+=t2;
-      }
-std::cout<<s2.size()<<' '<<bssid.size();
-
-//return(0);
  if(2>argc) /* TODO boost/program_options */
   {return(-1);
   }
@@ -839,9 +825,6 @@ std::cout<<s2.size()<<' '<<bssid.size();
                            }
                          }
                         endwin();
-                        //std::ofstream file("aps");
-                        //aps->file=&std::cout;
-                        //aps->file=&file;
                         aps->out=writefile;
                         draw(aps);
                         file.close();
