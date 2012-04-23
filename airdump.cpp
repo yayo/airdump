@@ -1,5 +1,5 @@
 /*
-g++ -ggdb3 -Wall -Wextra tcpdump.cpp -pthread -lpcap -lncurses -lboost_date_time-mt
+g++ -ggdb3 -Wall -Wextra airdump.cpp -pthread -lpcap -lncurses -lboost_date_time-mt
 */
 
 #include <sys/types.h>
@@ -537,7 +537,7 @@ void writescreen(const std::set<aps_sort_t> &aps_sort,const scan_t* aps)
 }
 
 void writefile(const std::set<aps_sort_t> &aps_sort,const scan_t* aps)
-{
+{aps->file->seekp(0);
  *(aps->file)<<"{\n";
  std::set<aps_sort_t>::const_iterator sort=aps_sort.begin();
  for(;sort!=aps_sort.end();)
@@ -562,23 +562,26 @@ struct param /* TODO move into thread */
  int fd;
  int kq;
  scan_t **aps;
- std::ostream *file;
+ std::fstream *file;
 };
 
 void* scan(void *p0)
 {const struct param *&p=(const struct param *&)p0;
  aps_t aps0;
+ scan_t aps={&aps0,sizeof(TITLE_CHANNELS)-1,sizeof(TITLE_ESSID)-1,sizeof(TITLE_SECURITY)-1,0,0,0,0,writescreen,p->file};
  if(NULL!=p->file)
   {boost::property_tree::ptree pt;
-   boost::property_tree::json_parser::read_json(p->file,pt);
+   boost::property_tree::json_parser::read_json(*(p->file),pt);
    boost::property_tree::ptree::const_iterator i;
    for(i=pt.begin();i!=pt.end();i++)
-    {assert(7==i->second.size());
+    {assert(12==i->first.size());
+     assert(7==i->second.size());
      boost::property_tree::ptree::const_iterator i2=i->second.begin();
      beacon b;
 
      assert(i2->first.empty());
      b.essid=(i2++)->second.data();
+     if(b.essid.size()>aps.max_length_essid) aps.max_length_essid=b.essid.size();
 
      assert(i2->first.empty()&&22==i2->second.data().size()&&'T'==i2->second.data()[8]&&'.'==i2->second.data()[15]);
      b.ts.tv_sec=(boost::posix_time::from_iso_string(i2->second.data().substr(0,15))-boost::posix_time::ptime(boost::gregorian::date(1970,1,1))).total_seconds() ;
@@ -612,6 +615,8 @@ void* scan(void *p0)
        b.channel.insert(std::pair<int16_t,uint8_t>(boost::lexical_cast<int16_t>(i3->first),channel_source));
       }
      assert(true==channel_from_beacon);
+     b.cache.channel=channel2string(b.channel);
+     if(b.cache.channel.size()>aps.max_length_channel) aps.max_length_channel=b.cache.channel.size();
      i2++;
 
      assert(i2->first.empty());
@@ -628,12 +633,18 @@ void* scan(void *p0)
        assert(string2security.end()!=i5);
        b.security|=i5->second;
       }
-     assert(i2->second.data()==security2string(b.security));
-     aps0.insert(aps_t::value_type(*(std::basic_string<uint8_t>*)&(i->first),b));
+     b.cache.security=security2string(b.security);
+     assert(i2->second.data()==b.cache.security);
+     if(b.cache.security.size()>aps.max_length_security) aps.max_length_security=b.cache.security.size();
+
+     uint8_t bssid[6+8];
+     assert(6==sscanf(i->first.c_str(),"%02X%02X%02X%02X%02X%02X",(unsigned int*)(bssid+0),(unsigned int*)(bssid+1),(unsigned int*)(bssid+2),(unsigned int*)(bssid+3),(unsigned int*)(bssid+4),(unsigned int*)(bssid+5)));
+     std::basic_string<uint8_t> bssid1(bssid,bssid+6);
+     assert(aps0.end()==aps0.find(bssid1));
+     aps0.insert(aps_t::value_type(bssid1,b));
     }
   }
 
- scan_t aps={&aps0,sizeof(TITLE_CHANNELS)-1,sizeof(TITLE_ESSID)-1,sizeof(TITLE_SECURITY)-1,0,0,0,0,writescreen,p->file};
  *(p->aps)=&aps;
  struct kevent change;
  EV_SET(&change,p->fd,EVFILT_READ,EV_ADD|EV_ONESHOT,0,0,NULL);
@@ -652,7 +663,20 @@ void* scan(void *p0)
 }
 
 int main(int argc,char *argv[])
-{if(2>argc) /* TODO boost/program_options */
+{
+
+std::string s2("123");
+     std::basic_string<uint8_t> bssid;
+     std::string::const_iterator i6;
+     for(i6=s2.begin();s2.end()!=i6;i6++)
+      {int8_t t1=*i6;
+       uint8_t t2=t1;
+       bssid+=t2;
+      }
+std::cout<<s2.size()<<' '<<bssid.size();
+
+//return(0);
+ if(2>argc) /* TODO boost/program_options */
   {return(-1);
   }
  else /* TODO return(rt); */
@@ -712,7 +736,10 @@ int main(int argc,char *argv[])
                      }
                     else
                      {std::fstream file("aps");
-                      if(file.good())
+                      if(!file.good())
+                       {std::cerr<<"Can not open file!\n";
+                       }
+                      else
                        {p.file=&file;
                         scan_t *aps=NULL;
                         p.aps=&aps;
@@ -767,8 +794,8 @@ int main(int argc,char *argv[])
                               case KEY_LEFT:
                                if(0!=aps->start_COL) aps->start_COL--;
                                break;
-  #define DISPLAY_LINES (LINES-1)
-  #define PAGE_MOVE (DISPLAY_LINES-1)
+#define DISPLAY_LINES (LINES-1)
+#define PAGE_MOVE (DISPLAY_LINES-1)
                               case KEY_DOWN:
                                if(aps->aps->size()>aps->start_LINE+DISPLAY_LINES) aps->start_LINE++;
                                break;
@@ -832,7 +859,6 @@ int main(int argc,char *argv[])
         }
       }
      pcap_close(p.pd);
-     sleep(99);
      return(0);
     }
   }
