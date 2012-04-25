@@ -192,11 +192,9 @@ const std::string channel2string(const std::map<int16_t,uint8_t> &c)
   {const uint8_t &channel_source=i->second;
    switch(channel_source)
     {case CHANNEL_FROM_BEACON:
-      if(false==channel_from_beacon)
-       {channelB+=(boost::format("%|1$d|,")%i->first).str();
-        channel_from_beacon=true;
-       }
-      else assert(false==channel_from_beacon);
+      if(false==channel_from_beacon) channel_from_beacon=true;
+      //else break; //assert(false==channel_from_beacon);
+      channelB+=(boost::format("%|1$d|,")%i->first).str();
       break;
      case CHANNEL_FROM_RADIOTAP:
       channelR+=(boost::format("%|1$d|,")%i->first).str();
@@ -565,6 +563,7 @@ struct param /* TODO move into thread */
 
 void* scan(void *p0)
 {const struct param *&p=(const struct param *&)p0;
+//fprintf(stderr,"\n\nHERE: %016llX\n",11);
  aps_t aps0;
  scan_t aps={&aps0,sizeof(TITLE_CHANNELS)-1,sizeof(TITLE_ESSID)-1,sizeof(TITLE_SECURITY)-1,0,0,0,0,writescreen,p->file};
  if(NULL!=p->file)
@@ -574,7 +573,8 @@ void* scan(void *p0)
    for(i=pt.begin();i!=pt.end();i++)
     {assert(12==i->first.size());
      aps_t::key_type bssid;
-     assert(1==sscanf(i->first.c_str(),"%012llX",&bssid)); /* TODO reject invalid */
+     assert(6==sscanf(i->first.c_str(),"%02hhX%02hhX%02hhX%02hhX%02hhX%02hhX",((uint8_t*)&bssid)+5,((uint8_t*)&bssid)+4,((uint8_t*)&bssid)+3,((uint8_t*)&bssid)+2,((uint8_t*)&bssid)+1,((uint8_t*)&bssid)+0)); /* TODO last invalid char should not be accepted ! */
+     bssid&=0x0000FFFFFFFFFFFF;
      assert(aps0.end()==aps0.find(bssid));
 
      assert(7==i->second.size());
@@ -591,13 +591,13 @@ void* scan(void *p0)
      i2++;
 
      assert(i2->first.empty());
-     b.count=boost::lexical_cast<size_t>((i2++)->second.data());
+     b.count=boost::lexical_cast<size_t>((i2++)->second.data()); /* TODO reset count */
 
      assert(i2->first.empty());
      b.power=boost::lexical_cast<int16_t>((i2++)->second.data());
      assert(i2->first.empty());
      b.power_max=boost::lexical_cast<int16_t>((i2++)->second.data());
-     assert(b.power<=b.power_max);
+     assert(b.power<=b.power_max); /* TODO reset power */
 
      assert(i2->first.empty()&&!i2->second.empty());
      boost::property_tree::ptree::const_iterator i3;
@@ -607,7 +607,6 @@ void* scan(void *p0)
        switch(channel_source)
         {case CHANNEL_FROM_BEACON:
           if(false==channel_from_beacon) channel_from_beacon=true;
-          else assert(false==channel_from_beacon);
           break;
          case CHANNEL_FROM_RADIOTAP: break;
          default:
@@ -653,7 +652,7 @@ void* scan(void *p0)
      return(NULL);
     }
    else
-    {pcap_dispatch(p->pd,0,parse,(uint8_t*)(&aps));
+    {pcap_dispatch(p->pd,0,parse,(uint8_t*)(&aps)); /* TODO endure pcap_close */
      draw(&aps);
     }
   }
@@ -721,7 +720,7 @@ int main(int argc,char *argv[])
                      {return(-1);
                      }
                     else
-                     {std::fstream file("aps");
+                     {std::fstream file("aps"); /* TODO multi aps input */ /* TODO merge aps files */
                       if(!file.good())
                        {std::cerr<<"Can not open file!\n";
                        }
@@ -818,6 +817,11 @@ int main(int argc,char *argv[])
                                refresh();
                                break;
   */
+                              case 'x':
+         //    close(p.fd);
+     //    pcap_freecode(&fp);
+     pcap_close(p.pd);// p.pd=NULL;
+                               break;
                               default:;
                                //fprintf(stderr,"%08X\n",c);
                              }
